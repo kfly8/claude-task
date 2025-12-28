@@ -1,0 +1,90 @@
+#!/bin/bash
+#
+# claude-task - Claude Code task management tool
+#
+# Usage:
+#   claude-task <command> [options]
+#
+# Commands:
+#   init     Initialize project configuration
+#   assign   Assign an issue to Claude
+#   help     Show help
+#
+
+set -e
+
+CDO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CDO_VERSION="0.1.0"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log() {
+  local level="$1"
+  local message="$2"
+  local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+  case "$level" in
+    INFO)  echo -e "${BLUE}[$timestamp]${NC} $message" ;;
+    OK)    echo -e "${GREEN}[$timestamp]${NC} $message" ;;
+    WARN)  echo -e "${YELLOW}[$timestamp]${NC} $message" ;;
+    ERROR) echo -e "${RED}[$timestamp]${NC} $message" ;;
+  esac
+}
+
+# Export for subcommands
+export CDO_ROOT CDO_VERSION
+export -f log
+export RED GREEN YELLOW BLUE NC
+
+show_help() {
+  cat <<EOF
+claude-task - Claude Code task management tool
+
+Usage:
+  claude-task <command> [options]
+
+Commands:
+  init <project-url>    Initialize with GitHub Project
+  assign <issue-url>    Assign an issue to Claude
+  help                  Show this help
+
+Examples:
+  claude-task init https://github.com/users/kfly8/projects/12
+  claude-task assign https://github.com/kfly8/repo/issues/42
+  claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
+
+Version: $CDO_VERSION
+EOF
+}
+
+# Main dispatch
+case "${1:-}" in
+  init)
+    shift
+    exec "$CDO_ROOT/libexec/claude-task-init" "$@"
+    ;;
+  assign)
+    shift
+    exec "$CDO_ROOT/libexec/claude-task-assign" "$@"
+    ;;
+  help|--help|-h)
+    show_help
+    ;;
+  version|--version|-v)
+    echo "claude-task version $CDO_VERSION"
+    ;;
+  "")
+    show_help
+    exit 1
+    ;;
+  *)
+    log ERROR "Unknown command: $1"
+    echo ""
+    show_help
+    exit 1
+    ;;
+esac

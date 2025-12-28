@@ -1,0 +1,247 @@
+#!/bin/bash
+#
+# claude-task assign - Assign an issue to Claude
+#
+# Usage:
+#   claude-task assign <github-issue-url> [options]
+#
+# Options:
+#   --dry-run   Show what would be done
+#   --no-skip   Don't use --dangerously-skip-permissions
+#
+
+set -e
+
+source "$CDO_ROOT/config.sh"
+
+usage() {
+  cat <<EOF
+Usage: claude-task assign <github-issue-url> [options]
+
+Examples:
+  claude-task assign https://github.com/kfly8/repo/issues/42
+  claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
+  claude-task assign https://github.com/kfly8/repo/issues/42 --no-skip
+
+Options:
+  --dry-run   Show what would be done
+  --no-skip   Don't use --dangerously-skip-permissions
+EOF
+}
+
+notify() {
+  local title="$1"
+  local message="$2"
+  osascript -e "display notification \"$message\" with title \"$title\"" 2>/dev/null || true
+  echo -e "\a"
+}
+
+parse_github_url() {
+  local url="$1"
+  if [[ "$url" =~ github\.com/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
+    OWNER="${BASH_REMATCH[1]}"
+    REPO="${BASH_REMATCH[2]}"
+    ISSUE_NUM="${BASH_REMATCH[3]}"
+    return 0
+  fi
+  return 1
+}
+
+# Update project status
+set_project_status() {
+  local issue_url="$1"
+  local status_id="$2"
+
+  # Add to project if not already (returns item ID)
+  ITEM_ID=$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" --format json 2>/dev/null | jq -r '.id')
+
+  if [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]]; then
+    # Already in project, find item ID
+    ITEMS=$(gh project item-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --limit 1000)
+    ITEM_ID=$(echo "$ITEMS" | jq -r --arg num "$ISSUE_NUM" '.items[] | select(.content.number == ($num | tonumber)) | .id')
+  fi
+
+  if [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]]; then
+    log WARN "Could not find item in project"
+    return 1
+  fi
+
+  gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
+    --field-id "$STATUS_FIELD_ID" --single-select-option-id "$status_id" >/dev/null 2>&1
+}
+
+# Check config
+if [[ -z "$PROJECT_ID" ]]; then
+  log ERROR "Project not configured. Run: claude-task init <project-url>"
+  exit 1
+fi
+
+# Parse arguments
+ISSUE_URL=""
+DRY_RUN=false
+SKIP_PERMISSIONS=true
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    --no-skip) SKIP_PERMISSIONS=false; shift ;;
+    *) [[ -z "$ISSUE_URL" ]] && ISSUE_URL="$1"; shift ;;
+  esac
+done
+
+if [[ -z "$ISSUE_URL" ]]; then
+  usage
+  exit 1
+fi
+
+if ! parse_github_url "$ISSUE_URL"; then
+  log ERROR "Invalid GitHub Issue URL: $ISSUE_URL"
+  exit 1
+fi
+
+FULL_REPO="${OWNER}/${REPO}"
+BRANCH_NAME="issue-${ISSUE_NUM}"
+
+# Find repo with ghq
+GHQ_ROOT=$(ghq root)
+REPO_PATH="${GHQ_ROOT}/github.com/${OWNER}/${REPO}"
+
+if [[ ! -d "$REPO_PATH" ]]; then
+  log ERROR "Repository not found: $REPO_PATH"
+  log INFO "Run: ghq get $FULL_REPO"
+  exit 1
+fi
+
+# Check if git-wo is available
+if ! git wo --help >/dev/null 2>&1; then
+  log ERROR "git-wo is not installed"
+  log INFO "Install from: https://github.com/kfly8/git-wo"
+  exit 1
+fi
+
+# Get worktree root from git config
+WORKTREE_ROOT=$(cd "$REPO_PATH" && git config --get wo.root 2>/dev/null || echo "$HOME/worktree")
+WORKTREE_PATH="${WORKTREE_ROOT}/github.com/${OWNER}/${REPO}/${BRANCH_NAME}"
+
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/${REPO}-${ISSUE_NUM}.log"
+
+log INFO "Fetching Issue #${ISSUE_NUM} from ${FULL_REPO}..."
+
+ISSUE_JSON=$(gh issue view "$ISSUE_NUM" --repo "$FULL_REPO" --json title,body,url)
+ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
+ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '.body // ""')
+
+if [[ -z "$ISSUE_TITLE" ]] || [[ "$ISSUE_TITLE" == "null" ]]; then
+  log ERROR "Could not fetch issue #${ISSUE_NUM}"
+  exit 1
+fi
+
+log OK "Found: $ISSUE_TITLE"
+
+if [[ "$DRY_RUN" == true ]]; then
+  echo ""
+  echo "=== DRY RUN ==="
+  echo "URL:        $ISSUE_URL"
+  echo "Repo:       $FULL_REPO"
+  echo "Issue:      #$ISSUE_NUM - $ISSUE_TITLE"
+  echo "Local:      $REPO_PATH"
+  echo "Worktree:   $WORKTREE_PATH"
+  echo "Log:        $LOG_FILE"
+  echo "Project:    $GITHUB_PROJECT_URL"
+  exit 0
+fi
+
+log INFO "Updating project status to WIP..."
+set_project_status "$ISSUE_URL" "$STATUS_WIP_ID" || true
+
+if [[ -d "$WORKTREE_PATH" ]]; then
+  log WARN "Worktree already exists: $WORKTREE_PATH"
+  read -p "Remove and recreate? [y/N] " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    cd "$REPO_PATH"
+    git wo remove "$WORKTREE_PATH" --force 2>/dev/null || true
+  else
+    log INFO "Using existing worktree"
+  fi
+fi
+
+if [[ ! -d "$WORKTREE_PATH" ]]; then
+  log INFO "Creating worktree: $BRANCH_NAME"
+  cd "$REPO_PATH"
+  git fetch origin
+
+  # Determine base branch
+  BASE_BRANCH="main"
+  if ! git rev-parse --verify origin/main >/dev/null 2>&1; then
+    if git rev-parse --verify origin/master >/dev/null 2>&1; then
+      BASE_BRANCH="master"
+    fi
+  fi
+
+  git wo add "$BRANCH_NAME" "origin/$BASE_BRANCH"
+fi
+
+cd "$WORKTREE_PATH"
+log OK "Worktree ready: $WORKTREE_PATH"
+
+CLAUDE_PROMPT="## Task
+Repository: ${FULL_REPO}
+Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
+URL: ${ISSUE_URL}
+
+## Description
+${ISSUE_BODY}
+
+## Instructions
+1. Read CLAUDE.md if exists for project conventions
+2. Write your implementation plan to plan.md and ask for approval
+3. After approval, implement the feature/fix described above
+4. Write tests if applicable
+5. Commit with clear message referencing #${ISSUE_NUM}
+6. Push to origin/${BRANCH_NAME}
+7. Create PR with 'Closes #${ISSUE_NUM}' in the body
+8. If blocked or need clarification, output: BLOCKED: <reason>
+
+When complete, output: DONE: <PR URL>"
+
+CLAUDE_CMD="claude"
+[[ "$SKIP_PERMISSIONS" == true ]] && CLAUDE_CMD="claude --dangerously-skip-permissions"
+
+log INFO "Starting Claude Code..."
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Issue:     #${ISSUE_NUM} - ${ISSUE_TITLE}"
+echo "Worktree:  ${WORKTREE_PATH}"
+echo "Log:       ${LOG_FILE}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Use script command to preserve TTY while logging
+script -q "$LOG_FILE" $CLAUDE_CMD "$CLAUDE_PROMPT"
+
+# Strip ANSI escape sequences for pattern matching
+strip_ansi() {
+  sed 's/\x1b\[[0-9;]*[mK]//g; s/\x1b][^\\]*\\//g; s/\x1b][^[:cntrl:]]*//g'
+}
+
+# After Claude exits, analyze log and update status
+CLEAN_LOG=$(cat "$LOG_FILE" | strip_ansi)
+
+if echo "$CLEAN_LOG" | grep -q "DONE"; then
+  set_project_status "$ISSUE_URL" "$STATUS_REVIEW_ID" || true
+  PR_URL=$(echo "$CLEAN_LOG" | grep -o 'https://github.com/[^[:space:]]*pull/[0-9]*' | head -1)
+  notify "Claude Done" "Issue #${ISSUE_NUM}: ${PR_URL:-completed}"
+fi
+
+if echo "$CLEAN_LOG" | grep -q "BLOCKED"; then
+  set_project_status "$ISSUE_URL" "$STATUS_BLOCKED_ID" || true
+  BLOCKED_MSG=$(echo "$CLEAN_LOG" | grep "BLOCKED" | head -1)
+  gh issue comment "$ISSUE_NUM" --repo "$FULL_REPO" --body "Claude is blocked: $BLOCKED_MSG" 2>/dev/null || true
+  notify "Claude Blocked" "Issue #${ISSUE_NUM} needs help"
+fi
+
+log OK "Claude session ended"
+log INFO "Log saved: $LOG_FILE"
