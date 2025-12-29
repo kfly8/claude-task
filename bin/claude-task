@@ -6,9 +6,11 @@
 #   claude-task <command> [options]
 #
 # Commands:
-#   init     Initialize project configuration
-#   assign   Assign an issue to Claude
-#   help     Show help
+#   init            Initialize project configuration
+#   assign          Assign an issue to Claude
+#   request-review  Update status to Review (called by Claude)
+#   report-blocked  Update status to Blocked (called by Claude)
+#   help            Show help
 #
 
 set -e
@@ -48,9 +50,11 @@ Usage:
   claude-task <command> [options]
 
 Commands:
-  init <project-url>    Initialize with GitHub Project
-  assign <issue-url>    Assign an issue to Claude
-  help                  Show this help
+  init <project-url>        Initialize with GitHub Project
+  assign <issue-url>        Assign an issue to Claude
+  request-review <pr-url>   Update status to Review (called by Claude)
+  report-blocked "<reason>" Update status to Blocked (called by Claude)
+  help                      Show this help
 
 Examples:
   claude-task init https://github.com/users/kfly8/projects/12
@@ -70,6 +74,14 @@ case "${1:-}" in
   assign)
     shift
     exec "$CDO_ROOT/libexec/claude-task-assign" "$@"
+    ;;
+  request-review)
+    shift
+    exec "$CDO_ROOT/libexec/claude-task-request-review" "$@"
+    ;;
+  report-blocked)
+    shift
+    exec "$CDO_ROOT/libexec/claude-task-report-blocked" "$@"
     ;;
   help|--help|-h)
     show_help

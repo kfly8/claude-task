@@ -6,13 +6,16 @@
 #   claude-task assign <github-issue-url> [options]
 #
 # Options:
-#   --dry-run   Show what would be done
-#   --no-skip   Don't use --dangerously-skip-permissions
+#   --dry-run      Show what would be done
+#   --no-skip      Don't use --dangerously-skip-permissions
+#   --no-sandbox   Disable sandbox (not recommended)
 #
 
 set -e
 
 source "$CDO_ROOT/config.sh"
+
+SANDBOX_PROFILE="$CDO_ROOT/sandbox/claude-task.sb"
 
 usage() {
   cat <<EOF
@@ -21,11 +24,12 @@ Usage: claude-task assign <github-issue-url> [options]
 Examples:
   claude-task assign https://github.com/kfly8/repo/issues/42
   claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
-  claude-task assign https://github.com/kfly8/repo/issues/42 --no-skip
+  claude-task assign https://github.com/kfly8/repo/issues/42 --no-sandbox
 
 Options:
-  --dry-run   Show what would be done
-  --no-skip   Don't use --dangerously-skip-permissions
+  --dry-run      Show what would be done
+  --no-skip      Don't use --dangerously-skip-permissions
+  --no-sandbox   Disable sandbox (not recommended)
 EOF
 }
 
@@ -80,12 +84,14 @@ fi
 ISSUE_URL=""
 DRY_RUN=false
 SKIP_PERMISSIONS=true
+USE_SANDBOX=true
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h|--help) usage; exit 0 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --no-skip) SKIP_PERMISSIONS=false; shift ;;
+    --no-sandbox) USE_SANDBOX=false; shift ;;
     *) [[ -z "$ISSUE_URL" ]] && ISSUE_URL="$1"; shift ;;
   esac
 done
@@ -114,14 +120,17 @@ if [[ ! -d "$REPO_PATH" ]]; then
 fi
 
 # Check if git-wo is available
-if ! git wo --help >/dev/null 2>&1; then
-  log ERROR "git-wo is not installed"
+if ! command -v git-wo >/dev/null 2>&1; then
+  log ERROR "git-wo is not installed or not in PATH"
   log INFO "Install from: https://github.com/kfly8/git-wo"
   exit 1
 fi
 
-# Get worktree root from git config
-WORKTREE_ROOT=$(cd "$REPO_PATH" && git config --get wo.root 2>/dev/null || echo "$HOME/worktree")
+# Get worktree root from git config (expand ~ to $HOME)
+WORKTREE_ROOT=$(cd "$REPO_PATH" && git config --get wo.root 2>/dev/null | sed "s|^~|$HOME|")
+if [[ -z "$WORKTREE_ROOT" ]]; then
+  WORKTREE_ROOT="$HOME/worktree"
+fi
 WORKTREE_PATH="${WORKTREE_ROOT}/github.com/${OWNER}/${REPO}/${BRANCH_NAME}"
 
 mkdir -p "$LOG_DIR"
@@ -181,11 +190,35 @@ if [[ ! -d "$WORKTREE_PATH" ]]; then
     fi
   fi
 
-  git wo add "$BRANCH_NAME" "origin/$BASE_BRANCH"
+  # Create worktree using git-wo with -C to specify main directory
+  GIT_WO_OUTPUT=$(git wo -C "$REPO_PATH" add "$BRANCH_NAME" "origin/$BASE_BRANCH" 2>&1)
+  echo "$GIT_WO_OUTPUT"
+
+  # Extract path from "Created: <path>" line and expand ~
+  WORKTREE_PATH=$(echo "$GIT_WO_OUTPUT" | grep "^Created:" | sed 's/^Created: //' | sed "s|^~|$HOME|")
 fi
 
 cd "$WORKTREE_PATH"
 log OK "Worktree ready: $WORKTREE_PATH"
+
+# Create context file for subcommands
+CONTEXT_FILE=".claude-task-context.json"
+cat > "$CONTEXT_FILE" <<EOF
+{
+  "issue_url": "${ISSUE_URL}",
+  "issue_num": "${ISSUE_NUM}",
+  "repo": "${FULL_REPO}",
+  "project": {
+    "owner": "${PROJECT_OWNER}",
+    "number": "${PROJECT_NUMBER}",
+    "id": "${PROJECT_ID}",
+    "status_field_id": "${STATUS_FIELD_ID}",
+    "review_status_id": "${STATUS_REVIEW_ID}",
+    "blocked_status_id": "${STATUS_BLOCKED_ID}"
+  }
+}
+EOF
+log OK "Context file created: $CONTEXT_FILE"
 
 CLAUDE_PROMPT="## Task
 Repository: ${FULL_REPO}
@@ -203,9 +236,10 @@ ${ISSUE_BODY}
 5. Commit with clear message referencing #${ISSUE_NUM}
 6. Push to origin/${BRANCH_NAME}
 7. Create PR with 'Closes #${ISSUE_NUM}' in the body
-8. If blocked or need clarification, output: BLOCKED: <reason>
 
-When complete, output: DONE: <PR URL>"
+## Completion
+- On success: Run \`claude-task request-review <PR_URL>\`
+- If blocked: Run \`claude-task report-blocked \"<reason>\"\`"
 
 CLAUDE_CMD="claude"
 [[ "$SKIP_PERMISSIONS" == true ]] && CLAUDE_CMD="claude --dangerously-skip-permissions"
@@ -216,32 +250,24 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Issue:     #${ISSUE_NUM} - ${ISSUE_TITLE}"
 echo "Worktree:  ${WORKTREE_PATH}"
 echo "Log:       ${LOG_FILE}"
+echo "Sandbox:   ${USE_SANDBOX}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Use script command to preserve TTY while logging
-script -q "$LOG_FILE" $CLAUDE_CMD "$CLAUDE_PROMPT"
-
-# Strip ANSI escape sequences for pattern matching
-strip_ansi() {
-  sed 's/\x1b\[[0-9;]*[mK]//g; s/\x1b][^\\]*\\//g; s/\x1b][^[:cntrl:]]*//g'
-}
-
-# After Claude exits, analyze log and update status
-CLEAN_LOG=$(cat "$LOG_FILE" | strip_ansi)
-
-if echo "$CLEAN_LOG" | grep -q "DONE"; then
-  set_project_status "$ISSUE_URL" "$STATUS_REVIEW_ID" || true
-  PR_URL=$(echo "$CLEAN_LOG" | grep -o 'https://github.com/[^[:space:]]*pull/[0-9]*' | head -1)
-  notify "Claude Done" "Issue #${ISSUE_NUM}: ${PR_URL:-completed}"
+if [[ "$USE_SANDBOX" == true ]]; then
+  # Run Claude in sandbox (restricts file writes to worktree only)
+  script -q "$LOG_FILE" sandbox-exec \
+    -f "$SANDBOX_PROFILE" \
+    -D "HOME=$HOME" \
+    -D "WORKTREE_PATH=$WORKTREE_PATH" \
+    -D "REPO_PATH=$REPO_PATH" \
+    $CLAUDE_CMD "$CLAUDE_PROMPT"
+else
+  # Run Claude without sandbox
+  script -q "$LOG_FILE" $CLAUDE_CMD "$CLAUDE_PROMPT"
 fi
 
-if echo "$CLEAN_LOG" | grep -q "BLOCKED"; then
-  set_project_status "$ISSUE_URL" "$STATUS_BLOCKED_ID" || true
-  BLOCKED_MSG=$(echo "$CLEAN_LOG" | grep "BLOCKED" | head -1)
-  gh issue comment "$ISSUE_NUM" --repo "$FULL_REPO" --body "Claude is blocked: $BLOCKED_MSG" 2>/dev/null || true
-  notify "Claude Blocked" "Issue #${ISSUE_NUM} needs help"
-fi
+# Status updates are handled by PostToolUse hook (hooks/post-tool-use.sh)
 
 log OK "Claude session ended"
 log INFO "Log saved: $LOG_FILE"
