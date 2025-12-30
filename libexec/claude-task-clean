@@ -1,0 +1,132 @@
+#!/bin/bash
+#
+# claude-task clean - Remove merged worktrees and branches
+#
+# Usage:
+#   claude-task clean [options]
+#
+# Options:
+#   --dry-run      Show what would be deleted without actually deleting
+#   -C <path>      Specify repository path (default: current directory)
+#
+
+set -e
+
+usage() {
+  cat <<EOF
+Usage: claude-task clean [options]
+
+Remove worktrees and branches that have been merged into main/master.
+
+Options:
+  --dry-run      Show what would be deleted without actually deleting
+  -C <path>      Specify repository path (default: current directory)
+  -h, --help     Show this help
+
+Examples:
+  claude-task clean
+  claude-task clean --dry-run
+  claude-task clean -C ~/src/github.com/owner/repo
+EOF
+}
+
+# Parse arguments
+REPO_PATH="."
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    -C) REPO_PATH="$2"; shift 2 ;;
+    *) log ERROR "Unknown option: $1"; usage; exit 1 ;;
+  esac
+done
+
+# Resolve to absolute path
+REPO_PATH=$(cd "$REPO_PATH" && pwd)
+
+if [[ ! -d "$REPO_PATH/.git" ]]; then
+  log ERROR "Not a git repository: $REPO_PATH"
+  exit 1
+fi
+
+cd "$REPO_PATH"
+
+# Determine base branch
+BASE_BRANCH="main"
+if ! git rev-parse --verify main >/dev/null 2>&1; then
+  if git rev-parse --verify master >/dev/null 2>&1; then
+    BASE_BRANCH="master"
+  else
+    log ERROR "Could not find main or master branch"
+    exit 1
+  fi
+fi
+
+log INFO "Repository: $REPO_PATH"
+log INFO "Base branch: $BASE_BRANCH"
+
+# Get worktree root from git config
+WORKTREE_ROOT=$(git config --get wo.root 2>/dev/null | sed "s|^~|$HOME|")
+if [[ -z "$WORKTREE_ROOT" ]]; then
+  WORKTREE_ROOT="$HOME/worktree"
+fi
+
+# Fetch latest to ensure we have accurate merge info
+log INFO "Fetching latest from remote..."
+git fetch origin --prune
+
+# Get merged branches (excluding base branch and current branch)
+MERGED_BRANCHES=$(git branch --merged "origin/$BASE_BRANCH" | grep -v "^\*" | grep -v "^[[:space:]]*${BASE_BRANCH}$" | sed 's/^[[:space:]]*//')
+
+if [[ -z "$MERGED_BRANCHES" ]]; then
+  log OK "No merged branches found"
+  exit 0
+fi
+
+# Count branches
+BRANCH_COUNT=$(echo "$MERGED_BRANCHES" | wc -l | tr -d ' ')
+log INFO "Found $BRANCH_COUNT merged branch(es)"
+
+if [[ "$DRY_RUN" == true ]]; then
+  echo ""
+  echo "=== DRY RUN ==="
+  echo "The following would be deleted:"
+  echo ""
+fi
+
+DELETED_COUNT=0
+
+while IFS= read -r branch; do
+  [[ -z "$branch" ]] && continue
+
+  # Get worktree path for this branch (if exists)
+  WORKTREE_INFO=$(git worktree list --porcelain | grep -A2 "^worktree " | grep -B1 "branch refs/heads/$branch$" | head -1 | sed 's/^worktree //')
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "  Branch: $branch"
+    if [[ -n "$WORKTREE_INFO" ]]; then
+      echo "  Worktree: $WORKTREE_INFO"
+    fi
+    echo ""
+  else
+    # Remove worktree first if exists
+    if [[ -n "$WORKTREE_INFO" ]]; then
+      log INFO "Removing worktree: $WORKTREE_INFO"
+      git worktree remove "$WORKTREE_INFO" --force 2>/dev/null || true
+    fi
+
+    # Delete the branch
+    log INFO "Deleting branch: $branch"
+    git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
+
+    ((DELETED_COUNT++)) || true
+  fi
+done <<< "$MERGED_BRANCHES"
+
+if [[ "$DRY_RUN" == true ]]; then
+  echo "Run without --dry-run to delete these branches and worktrees."
+else
+  log OK "Cleaned up $DELETED_COUNT branch(es)"
+fi
