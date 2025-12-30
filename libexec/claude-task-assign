@@ -51,6 +51,23 @@ parse_github_url() {
   return 1
 }
 
+# Convert title to branch-friendly slug
+slugify_title() {
+  local title="$1"
+  local slug
+
+  # Check if title contains Japanese characters
+  if echo "$title" | grep -qE '[ぁ-んァ-ン一-龥]'; then
+    # Translate to English using claude with fast model
+    slug=$(echo "$title" | claude -p --model haiku "Translate to a short English branch name slug. Rules: lowercase, use hyphens, no spaces, max 5 words. Output ONLY the slug, nothing else.")
+  else
+    slug="$title"
+  fi
+
+  # Normalize: lowercase, spaces to hyphens, keep only alphanumeric and hyphens, limit length
+  echo "$slug" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | head -c 50
+}
+
 # Update project status
 set_project_status() {
   local issue_url="$1"
@@ -107,7 +124,7 @@ if ! parse_github_url "$ISSUE_URL"; then
 fi
 
 FULL_REPO="${OWNER}/${REPO}"
-BRANCH_NAME="issue-${ISSUE_NUM}"
+# BRANCH_NAME will be set after fetching issue title
 
 # Find repo with ghq
 GHQ_ROOT=$(ghq root)
@@ -131,7 +148,6 @@ WORKTREE_ROOT=$(cd "$REPO_PATH" && git config --get wo.root 2>/dev/null | sed "s
 if [[ -z "$WORKTREE_ROOT" ]]; then
   WORKTREE_ROOT="$HOME/worktree"
 fi
-WORKTREE_PATH="${WORKTREE_ROOT}/github.com/${OWNER}/${REPO}/${BRANCH_NAME}"
 
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/${REPO}-${ISSUE_NUM}.log"
@@ -149,12 +165,24 @@ fi
 
 log OK "Found: $ISSUE_TITLE"
 
+# Generate branch name from issue number and title
+TITLE_SLUG=$(slugify_title "$ISSUE_TITLE")
+if [[ -n "$TITLE_SLUG" ]]; then
+  BRANCH_NAME="issue-${ISSUE_NUM}-${TITLE_SLUG}"
+else
+  BRANCH_NAME="issue-${ISSUE_NUM}"
+fi
+WORKTREE_PATH="${WORKTREE_ROOT}/github.com/${OWNER}/${REPO}/${BRANCH_NAME}"
+
+log INFO "Branch: $BRANCH_NAME"
+
 if [[ "$DRY_RUN" == true ]]; then
   echo ""
   echo "=== DRY RUN ==="
   echo "URL:        $ISSUE_URL"
   echo "Repo:       $FULL_REPO"
   echo "Issue:      #$ISSUE_NUM - $ISSUE_TITLE"
+  echo "Branch:     $BRANCH_NAME"
   echo "Local:      $REPO_PATH"
   echo "Worktree:   $WORKTREE_PATH"
   echo "Log:        $LOG_FILE"
