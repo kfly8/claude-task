@@ -59,8 +59,8 @@ slugify_title() {
   # Remove labels like [P1], [Bug], etc. from the beginning
   title=$(echo "$title" | sed 's/^\[[^]]*\][[:space:]]*//')
 
-  # Check if title contains Japanese characters
-  if echo "$title" | grep -qE '[ぁ-んァ-ン一-龥]'; then
+  # Check if title contains non-ASCII characters (Japanese, etc.)
+  if echo "$title" | LC_ALL=C grep -q '[^[:print:][:space:]]'; then
     # Translate to English using claude with fast model
     slug=$(echo "$title" | claude -p --model haiku "Translate to a short English branch name slug. Rules: lowercase, use hyphens, no spaces, max 5 words. Output ONLY the slug, nothing else.")
   else
