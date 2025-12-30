@@ -78,7 +78,8 @@ log INFO "Fetching latest from remote..."
 git fetch origin --prune
 
 # Get merged branches (excluding base branch and current branch)
-MERGED_BRANCHES=$(git branch --merged "origin/$BASE_BRANCH" | grep -v "^\*" | grep -v "^[[:space:]]*${BASE_BRANCH}$" | sed 's/^[[:space:]]*//')
+# Note: + prefix indicates branch is checked out in a worktree, * indicates current branch
+MERGED_BRANCHES=$(git branch --merged "origin/$BASE_BRANCH" | grep -v "^\*" | grep -v "^[[:space:]]*${BASE_BRANCH}$" | sed 's/^[+* ]*//g')
 
 if [[ -z "$MERGED_BRANCHES" ]]; then
   log OK "No merged branches found"
@@ -102,7 +103,7 @@ while IFS= read -r branch; do
   [[ -z "$branch" ]] && continue
 
   # Get worktree path for this branch (if exists)
-  WORKTREE_INFO=$(git worktree list --porcelain | grep -A2 "^worktree " | grep -B1 "branch refs/heads/$branch$" | head -1 | sed 's/^worktree //')
+  WORKTREE_INFO=$(git worktree list --porcelain | grep -B2 "refs/heads/$branch$" | head -1 | sed 's/^worktree //')
 
   if [[ "$DRY_RUN" == true ]]; then
     echo "  Branch: $branch"
