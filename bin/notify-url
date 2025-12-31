@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# notify-url - Display notification dialog that opens URL when clicked
+#
+# Usage: notify-url <title> <message> <url>
+#
+
+if [[ $# -lt 3 ]]; then
+  echo "Usage: notify-url <title> <message> <url>" >&2
+  exit 1
+fi
+
+TITLE="$1"
+MESSAGE="$2"
+URL="$3"
+
+# Display alert dialog with "Open" and "Dismiss" buttons
+# If user clicks "Open", open the URL
+osascript <<EOF
+set userChoice to display alert "$TITLE" message "$MESSAGE" buttons {"Dismiss", "Open"} default button "Open"
+if button returned of userChoice is "Open" then
+  open location "$URL"
+end if
+EOF

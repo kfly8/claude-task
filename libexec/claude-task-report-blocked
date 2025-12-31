@@ -53,8 +53,8 @@ echo "Reason: $REASON"
 # Add comment to issue
 gh issue comment "$ISSUE_NUM" --repo "$REPO" --body "Claude is blocked: $REASON" 2>/dev/null || true
 
-# Send notification
-osascript -e "display notification \"Issue #${ISSUE_NUM} needs help\" with title \"Claude Blocked\"" 2>/dev/null || true
+# Send notification with clickable URL
+"$CDO_ROOT/bin/notify-url" "Claude Blocked" "Issue #${ISSUE_NUM} needs help" "$ISSUE_URL" &
 
 # Clean up context file
 rm "$CONTEXT_FILE"

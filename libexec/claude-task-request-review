@@ -50,8 +50,8 @@ gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
 echo "Project status updated to Review"
 echo "PR: $PR_URL"
 
-# Send notification
-osascript -e "display notification \"Issue #${ISSUE_NUM}: ${PR_URL}\" with title \"Claude Done\"" 2>/dev/null || true
+# Send notification with clickable URL
+"$CDO_ROOT/bin/notify-url" "Claude Done" "Issue #${ISSUE_NUM}: PR ready for review" "$PR_URL" &
 
 # Clean up context file
 rm "$CONTEXT_FILE"

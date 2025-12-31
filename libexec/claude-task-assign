@@ -275,6 +275,9 @@ ${ISSUE_BODY}
 CLAUDE_CMD="claude"
 [[ "$SKIP_PERMISSIONS" == true ]] && CLAUDE_CMD="claude --dangerously-skip-permissions"
 
+echo "DEBUG: CLAUDE_CMD = $CLAUDE_CMD"
+echo "DEBUG: SKIP_PERMISSIONS = $SKIP_PERMISSIONS"
+
 log INFO "Starting Claude Code..."
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
