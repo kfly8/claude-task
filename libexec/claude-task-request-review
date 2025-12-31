@@ -2,7 +2,7 @@
 # claude-task request-review - Update project status to Review
 set -euo pipefail
 
-CONTEXT_FILE=".claude-task-context.json"
+CONTEXT_FILE="tmp/.claude-task-context.json"
 
 # Check for PR URL argument
 if [[ $# -lt 1 ]]; then

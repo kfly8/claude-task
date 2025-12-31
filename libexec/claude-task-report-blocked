@@ -2,7 +2,7 @@
 # claude-task report-blocked - Update project status to Blocked
 set -euo pipefail
 
-CONTEXT_FILE=".claude-task-context.json"
+CONTEXT_FILE="tmp/.claude-task-context.json"
 
 # Check for reason argument
 if [[ $# -lt 1 ]]; then

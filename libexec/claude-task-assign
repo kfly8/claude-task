@@ -232,8 +232,11 @@ fi
 cd "$WORKTREE_PATH"
 log OK "Worktree ready: $WORKTREE_PATH"
 
+# Create tmp directory for temporary files (plan.md, etc.) to avoid accidental commits
+mkdir -p tmp
+
 # Create context file for subcommands
-CONTEXT_FILE=".claude-task-context.json"
+CONTEXT_FILE="tmp/.claude-task-context.json"
 cat > "$CONTEXT_FILE" <<EOF
 {
   "issue_url": "${ISSUE_URL}",
@@ -261,7 +264,7 @@ ${ISSUE_BODY}
 
 ## Instructions
 1. Read CLAUDE.md if exists for project conventions
-2. Write your implementation plan to plan.md and ask for approval
+2. Write your implementation plan to tmp/plan.md and ask for approval
 3. After approval, implement the feature/fix described above
 4. Write tests if applicable
 5. Commit with clear message referencing #${ISSUE_NUM}
