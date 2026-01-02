@@ -25,11 +25,13 @@ Examples:
   claude-task assign https://github.com/kfly8/repo/issues/42
   claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
   claude-task assign https://github.com/kfly8/repo/issues/42 --no-sandbox
+  claude-task assign https://github.com/kfly8/repo/issues/42 --log
 
 Options:
   --dry-run      Show what would be done
   --no-skip      Don't use --dangerously-skip-permissions
   --no-sandbox   Disable sandbox (not recommended)
+  --log          Enable session logging to ~/.claude-task/logs/
 EOF
 }
 
@@ -105,6 +107,7 @@ ISSUE_URL=""
 DRY_RUN=false
 SKIP_PERMISSIONS=true
 USE_SANDBOX=true
+ENABLE_LOGGING=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -112,6 +115,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     --no-skip) SKIP_PERMISSIONS=false; shift ;;
     --no-sandbox) USE_SANDBOX=false; shift ;;
+    --log) ENABLE_LOGGING=true; shift ;;
     *) [[ -z "$ISSUE_URL" ]] && ISSUE_URL="$1"; shift ;;
   esac
 done
@@ -152,8 +156,11 @@ if [[ -z "$WORKTREE_ROOT" ]]; then
   WORKTREE_ROOT="$HOME/worktree"
 fi
 
-mkdir -p "$LOG_DIR"
-LOG_FILE="${LOG_DIR}/${REPO}-${ISSUE_NUM}.log"
+# Setup logging if enabled
+if [[ "$ENABLE_LOGGING" == true ]]; then
+  mkdir -p "$LOG_DIR"
+  LOG_FILE="${LOG_DIR}/${REPO}-${ISSUE_NUM}.log"
+fi
 
 log INFO "Fetching Issue #${ISSUE_NUM} from ${FULL_REPO}..."
 
@@ -188,7 +195,8 @@ if [[ "$DRY_RUN" == true ]]; then
   echo "Branch:     $BRANCH_NAME"
   echo "Local:      $REPO_PATH"
   echo "Worktree:   $WORKTREE_PATH"
-  echo "Log:        $LOG_FILE"
+  echo "Logging:    $ENABLE_LOGGING"
+  [[ "$ENABLE_LOGGING" == true ]] && echo "Log:        $LOG_FILE"
   echo "Project:    $GITHUB_PROJECT_URL"
   exit 0
 fi
@@ -286,25 +294,30 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Issue:     #${ISSUE_NUM} - ${ISSUE_TITLE}"
 echo "Worktree:  ${WORKTREE_PATH}"
-echo "Log:       ${LOG_FILE}"
 echo "Sandbox:   ${USE_SANDBOX}"
+echo "Logging:   ${ENABLE_LOGGING}"
+[[ "$ENABLE_LOGGING" == true ]] && echo "Log:       ${LOG_FILE}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 if [[ "$USE_SANDBOX" == true ]]; then
   # Run Claude in sandbox (restricts file writes to worktree only)
-  script -q "$LOG_FILE" sandbox-exec \
-    -f "$SANDBOX_PROFILE" \
-    -D "HOME=$HOME" \
-    -D "WORKTREE_PATH=$WORKTREE_PATH" \
-    -D "REPO_PATH=$REPO_PATH" \
-    $CLAUDE_CMD "$CLAUDE_PROMPT"
+  SANDBOX_CMD="sandbox-exec -f $SANDBOX_PROFILE -D HOME=$HOME -D WORKTREE_PATH=$WORKTREE_PATH -D REPO_PATH=$REPO_PATH"
+  if [[ "$ENABLE_LOGGING" == true ]]; then
+    script -q "$LOG_FILE" $SANDBOX_CMD $CLAUDE_CMD "$CLAUDE_PROMPT"
+  else
+    $SANDBOX_CMD $CLAUDE_CMD "$CLAUDE_PROMPT"
+  fi
 else
   # Run Claude without sandbox
-  script -q "$LOG_FILE" $CLAUDE_CMD "$CLAUDE_PROMPT"
+  if [[ "$ENABLE_LOGGING" == true ]]; then
+    script -q "$LOG_FILE" $CLAUDE_CMD "$CLAUDE_PROMPT"
+  else
+    $CLAUDE_CMD "$CLAUDE_PROMPT"
+  fi
 fi
 
 # Status updates are handled by PostToolUse hook (hooks/post-tool-use.sh)
 
 log OK "Claude session ended"
-log INFO "Log saved: $LOG_FILE"
+[[ "$ENABLE_LOGGING" == true ]] && log INFO "Log saved: $LOG_FILE"
