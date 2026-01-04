@@ -7,7 +7,6 @@
 #
 # Options:
 #   --dry-run      Show what would be done
-#   --no-skip      Don't use --dangerously-skip-permissions
 #   --no-sandbox   Disable sandbox (not recommended)
 #
 
@@ -26,7 +25,6 @@ Examples:
 
 Options:
   --dry-run      Show what would be done
-  --no-skip      Don't use --dangerously-skip-permissions
   --no-sandbox   Disable sandbox (not recommended)
 EOF
 }
@@ -72,14 +70,12 @@ slugify_title() {
 # Parse arguments
 ISSUE_URL=""
 DRY_RUN=false
-SKIP_PERMISSIONS=true
 USE_SANDBOX=true
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h|--help) usage; exit 0 ;;
     --dry-run) DRY_RUN=true; shift ;;
-    --no-skip) SKIP_PERMISSIONS=false; shift ;;
     --no-sandbox) USE_SANDBOX=false; shift ;;
     *) [[ -z "$ISSUE_URL" ]] && ISSUE_URL="$1"; shift ;;
   esac
@@ -209,8 +205,7 @@ ${ISSUE_BODY}
 5. Push to origin/${BRANCH_NAME}
 6. Create PR with 'Closes #${ISSUE_NUM}' in the body"
 
-CLAUDE_CMD="claude"
-[[ "$SKIP_PERMISSIONS" == true ]] && CLAUDE_CMD="claude --dangerously-skip-permissions"
+CLAUDE_CMD="claude --permission-mode plan"
 
 log INFO "Starting Claude Code..."
 echo ""
