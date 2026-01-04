@@ -6,10 +6,7 @@
 #   claude-task <command> [options]
 #
 # Commands:
-#   init            Initialize project configuration
 #   assign          Assign an issue to Claude
-#   request-review  Update status to Review (called by Claude)
-#   report-blocked  Update status to Blocked (called by Claude)
 #   clean           Remove merged worktrees and branches
 #   help            Show help
 #
@@ -51,15 +48,11 @@ Usage:
   claude-task <command> [options]
 
 Commands:
-  init <project-url>        Initialize with GitHub Project
   assign <issue-url>        Assign an issue to Claude
-  request-review <pr-url>   Update status to Review (called by Claude)
-  report-blocked "<reason>" Update status to Blocked (called by Claude)
   clean                     Remove merged worktrees and branches
   help                      Show this help
 
 Examples:
-  claude-task init https://github.com/users/kfly8/projects/12
   claude-task assign https://github.com/kfly8/repo/issues/42
   claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
   claude-task clean --dry-run
@@ -70,21 +63,9 @@ EOF
 
 # Main dispatch
 case "${1:-}" in
-  init)
-    shift
-    exec "$CDO_ROOT/libexec/claude-task-init" "$@"
-    ;;
   assign)
     shift
     exec "$CDO_ROOT/libexec/claude-task-assign" "$@"
-    ;;
-  request-review)
-    shift
-    exec "$CDO_ROOT/libexec/claude-task-request-review" "$@"
-    ;;
-  report-blocked)
-    shift
-    exec "$CDO_ROOT/libexec/claude-task-report-blocked" "$@"
     ;;
   clean)
     shift

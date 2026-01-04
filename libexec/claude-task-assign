@@ -13,8 +13,6 @@
 
 set -e
 
-source "$CDO_ROOT/config.sh"
-
 SANDBOX_PROFILE="$CDO_ROOT/sandbox/claude-task.sb"
 
 usage() {
@@ -25,13 +23,11 @@ Examples:
   claude-task assign https://github.com/kfly8/repo/issues/42
   claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
   claude-task assign https://github.com/kfly8/repo/issues/42 --no-sandbox
-  claude-task assign https://github.com/kfly8/repo/issues/42 --log
 
 Options:
   --dry-run      Show what would be done
   --no-skip      Don't use --dangerously-skip-permissions
   --no-sandbox   Disable sandbox (not recommended)
-  --log          Enable session logging to ~/.claude-task/logs/
 EOF
 }
 
@@ -73,41 +69,11 @@ slugify_title() {
   echo "$slug" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | head -c 50
 }
 
-# Update project status
-set_project_status() {
-  local issue_url="$1"
-  local status_id="$2"
-
-  # Add to project if not already (returns item ID)
-  ITEM_ID=$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$issue_url" --format json 2>/dev/null | jq -r '.id')
-
-  if [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]]; then
-    # Already in project, find item ID
-    ITEMS=$(gh project item-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --limit 1000)
-    ITEM_ID=$(echo "$ITEMS" | jq -r --arg num "$ISSUE_NUM" '.items[] | select(.content.number == ($num | tonumber)) | .id')
-  fi
-
-  if [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]]; then
-    log WARN "Could not find item in project"
-    return 1
-  fi
-
-  gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
-    --field-id "$STATUS_FIELD_ID" --single-select-option-id "$status_id" >/dev/null 2>&1
-}
-
-# Check config
-if [[ -z "$PROJECT_ID" ]]; then
-  log ERROR "Project not configured. Run: claude-task init <project-url>"
-  exit 1
-fi
-
 # Parse arguments
 ISSUE_URL=""
 DRY_RUN=false
 SKIP_PERMISSIONS=true
 USE_SANDBOX=true
-ENABLE_LOGGING=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -115,7 +81,6 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     --no-skip) SKIP_PERMISSIONS=false; shift ;;
     --no-sandbox) USE_SANDBOX=false; shift ;;
-    --log) ENABLE_LOGGING=true; shift ;;
     *) [[ -z "$ISSUE_URL" ]] && ISSUE_URL="$1"; shift ;;
   esac
 done
@@ -131,7 +96,6 @@ if ! parse_github_url "$ISSUE_URL"; then
 fi
 
 FULL_REPO="${OWNER}/${REPO}"
-# BRANCH_NAME will be set after fetching issue title
 
 # Find repo with ghq
 GHQ_ROOT=$(ghq root)
@@ -154,12 +118,6 @@ fi
 WORKTREE_ROOT=$(cd "$REPO_PATH" && git config --get wo.root 2>/dev/null | sed "s|^~|$HOME|")
 if [[ -z "$WORKTREE_ROOT" ]]; then
   WORKTREE_ROOT="$HOME/worktree"
-fi
-
-# Setup logging if enabled
-if [[ "$ENABLE_LOGGING" == true ]]; then
-  mkdir -p "$LOG_DIR"
-  LOG_FILE="${LOG_DIR}/${REPO}-${ISSUE_NUM}.log"
 fi
 
 log INFO "Fetching Issue #${ISSUE_NUM} from ${FULL_REPO}..."
@@ -195,14 +153,9 @@ if [[ "$DRY_RUN" == true ]]; then
   echo "Branch:     $BRANCH_NAME"
   echo "Local:      $REPO_PATH"
   echo "Worktree:   $WORKTREE_PATH"
-  echo "Logging:    $ENABLE_LOGGING"
-  [[ "$ENABLE_LOGGING" == true ]] && echo "Log:        $LOG_FILE"
-  echo "Project:    $GITHUB_PROJECT_URL"
+  echo "Sandbox:    $USE_SANDBOX"
   exit 0
 fi
-
-log INFO "Updating project status to WIP..."
-set_project_status "$ISSUE_URL" "$STATUS_WIP_ID" || true
 
 if [[ -d "$WORKTREE_PATH" ]]; then
   log WARN "Worktree already exists: $WORKTREE_PATH"
@@ -240,28 +193,6 @@ fi
 cd "$WORKTREE_PATH"
 log OK "Worktree ready: $WORKTREE_PATH"
 
-# Create tmp directory for temporary files (plan.md, etc.) to avoid accidental commits
-mkdir -p tmp
-
-# Create context file for subcommands
-CONTEXT_FILE="tmp/.claude-task-context.json"
-cat > "$CONTEXT_FILE" <<EOF
-{
-  "issue_url": "${ISSUE_URL}",
-  "issue_num": "${ISSUE_NUM}",
-  "repo": "${FULL_REPO}",
-  "project": {
-    "owner": "${PROJECT_OWNER}",
-    "number": "${PROJECT_NUMBER}",
-    "id": "${PROJECT_ID}",
-    "status_field_id": "${STATUS_FIELD_ID}",
-    "review_status_id": "${STATUS_REVIEW_ID}",
-    "blocked_status_id": "${STATUS_BLOCKED_ID}"
-  }
-}
-EOF
-log OK "Context file created: $CONTEXT_FILE"
-
 CLAUDE_PROMPT="## Task
 Repository: ${FULL_REPO}
 Issue #${ISSUE_NUM}: ${ISSUE_TITLE}
@@ -272,22 +203,14 @@ ${ISSUE_BODY}
 
 ## Instructions
 1. Read CLAUDE.md if exists for project conventions
-2. Write your implementation plan to tmp/plan.md and ask for approval
-3. After approval, implement the feature/fix described above
-4. Write tests if applicable
-5. Commit with clear message referencing #${ISSUE_NUM}
-6. Push to origin/${BRANCH_NAME}
-7. Create PR with 'Closes #${ISSUE_NUM}' in the body
-
-## Completion
-- On success: Run \`claude-task request-review <PR_URL>\`
-- If blocked: Run \`claude-task report-blocked \"<reason>\"\`"
+2. Implement the feature/fix described above
+3. Write tests if applicable
+4. Commit with clear message referencing #${ISSUE_NUM}
+5. Push to origin/${BRANCH_NAME}
+6. Create PR with 'Closes #${ISSUE_NUM}' in the body"
 
 CLAUDE_CMD="claude"
 [[ "$SKIP_PERMISSIONS" == true ]] && CLAUDE_CMD="claude --dangerously-skip-permissions"
-
-echo "DEBUG: CLAUDE_CMD = $CLAUDE_CMD"
-echo "DEBUG: SKIP_PERMISSIONS = $SKIP_PERMISSIONS"
 
 log INFO "Starting Claude Code..."
 echo ""
@@ -295,29 +218,16 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Issue:     #${ISSUE_NUM} - ${ISSUE_TITLE}"
 echo "Worktree:  ${WORKTREE_PATH}"
 echo "Sandbox:   ${USE_SANDBOX}"
-echo "Logging:   ${ENABLE_LOGGING}"
-[[ "$ENABLE_LOGGING" == true ]] && echo "Log:       ${LOG_FILE}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 if [[ "$USE_SANDBOX" == true ]]; then
   # Run Claude in sandbox (restricts file writes to worktree only)
   SANDBOX_CMD="sandbox-exec -f $SANDBOX_PROFILE -D HOME=$HOME -D WORKTREE_PATH=$WORKTREE_PATH -D REPO_PATH=$REPO_PATH"
-  if [[ "$ENABLE_LOGGING" == true ]]; then
-    script -q "$LOG_FILE" $SANDBOX_CMD $CLAUDE_CMD "$CLAUDE_PROMPT"
-  else
-    $SANDBOX_CMD $CLAUDE_CMD "$CLAUDE_PROMPT"
-  fi
+  $SANDBOX_CMD $CLAUDE_CMD "$CLAUDE_PROMPT"
 else
   # Run Claude without sandbox
-  if [[ "$ENABLE_LOGGING" == true ]]; then
-    script -q "$LOG_FILE" $CLAUDE_CMD "$CLAUDE_PROMPT"
-  else
-    $CLAUDE_CMD "$CLAUDE_PROMPT"
-  fi
+  $CLAUDE_CMD "$CLAUDE_PROMPT"
 fi
 
-# Status updates are handled by PostToolUse hook (hooks/post-tool-use.sh)
-
 log OK "Claude session ended"
-[[ "$ENABLE_LOGGING" == true ]] && log INFO "Log saved: $LOG_FILE"
