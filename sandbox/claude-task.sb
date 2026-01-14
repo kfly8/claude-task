@@ -40,6 +40,11 @@
 (allow file-write*
   (subpath (string-append (param "HOME") "/Library/Preferences/.wrangler")))
 
+; Allow writes to Playwright browser cache and related directories
+(allow file-write*
+  (subpath (string-append (param "HOME") "/Library/Caches/ms-playwright"))
+  (subpath (string-append (param "HOME") "/.cache/ms-playwright")))
+
 ; Allow writes to /tmp and /var (needed for various tools)
 (allow file-write*
   (subpath "/tmp")
