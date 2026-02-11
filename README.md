@@ -4,10 +4,9 @@ A CLI tool that creates isolated worktrees for GitHub Issues and processes them 
 
 ## Requirements
 
-- macOS (uses Apple Seatbelt for sandboxing)
 - [gh](https://cli.github.com/) - GitHub CLI
 - [ghq](https://github.com/x-motemen/ghq) - Repository management
-- [git-wo](https://github.com/kfly8/git-wo) - Worktree management
+- [git-wo](https://github.com/kfly8/git-wo) (>= v0.05) - Worktree management
 - [jq](https://jqlang.github.io/jq/) - JSON processing
 - [Claude Code](https://claude.ai/claude-code) - Claude CLI
 
@@ -46,7 +45,7 @@ claude-task assign https://github.com/OWNER/REPO/issues/42
 This will:
 1. Fetch the issue content from GitHub
 2. Create a new git worktree with branch `issue-42-<slug>`
-3. Start Claude Code in **plan mode** within a sandbox
+3. Start Claude Code in **plan mode**
 
 Claude Code starts in plan mode, allowing you to review the implementation plan before execution. Press `Shift+Tab` to switch to implementation mode after approving the plan.
 
@@ -54,7 +53,6 @@ Claude Code starts in plan mode, allowing you to review the implementation plan 
 | Option | Description |
 |--------|-------------|
 | `--dry-run` | Preview only, no execution |
-| `--no-sandbox` | Disable sandbox (not recommended) |
 
 ### Clean Up Merged Branches
 
@@ -86,7 +84,7 @@ Removes worktrees and branches that have been merged into main/master.
                            ▼
               ┌────────────────────────┐
               │   Start Claude Code    │
-              │   (plan mode + sandbox)│
+              │      (plan mode)       │
               └────────────────────────┘
                            │
                            ▼
@@ -112,32 +110,12 @@ claude-task/
 ├── libexec/
 │   ├── claude-task-assign    # Issue assignment
 │   └── claude-task-clean     # Cleanup merged worktrees
-├── sandbox/
-│   └── claude-task.sb        # Sandbox profile
 └── README.md
 ```
 
 ## Security
 
-Claude Code runs in plan mode by default, which only allows read-only operations until you approve the plan. Additionally, file access is restricted using Apple Seatbelt (sandbox-exec).
-
-### Restrictions
-
-| Target | Permission |
-|--------|------------|
-| worktree directory | Read/Write |
-| Main repository .git | Read/Write (for worktree operations) |
-| ~/.claude, ~/.claude.json | Read/Write |
-| ~/.bun | Read/Write |
-| /tmp, /var | Read/Write |
-| Home directory (except above) | Read only |
-| Network | Unrestricted |
-
-### Sandbox Profile
-
-Customize via `sandbox/claude-task.sb`.
-
-Reference: https://www.mizdra.net/entry/2025/12/01/121805
+Claude Code runs in plan mode by default, which only allows read-only operations until you approve the plan.
 
 ## License
 

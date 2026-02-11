@@ -7,12 +7,9 @@
 #
 # Options:
 #   --dry-run      Show what would be done
-#   --no-sandbox   Disable sandbox (not recommended)
 #
 
 set -e
-
-SANDBOX_PROFILE="$CDO_ROOT/sandbox/claude-task.sb"
 
 usage() {
   cat <<EOF
@@ -21,11 +18,9 @@ Usage: claude-task assign <github-issue-url> [options]
 Examples:
   claude-task assign https://github.com/kfly8/repo/issues/42
   claude-task assign https://github.com/kfly8/repo/issues/42 --dry-run
-  claude-task assign https://github.com/kfly8/repo/issues/42 --no-sandbox
 
 Options:
   --dry-run      Show what would be done
-  --no-sandbox   Disable sandbox (not recommended)
 EOF
 }
 
@@ -70,13 +65,11 @@ slugify_title() {
 # Parse arguments
 ISSUE_URL=""
 DRY_RUN=false
-USE_SANDBOX=true
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h|--help) usage; exit 0 ;;
     --dry-run) DRY_RUN=true; shift ;;
-    --no-sandbox) USE_SANDBOX=false; shift ;;
     *) [[ -z "$ISSUE_URL" ]] && ISSUE_URL="$1"; shift ;;
   esac
 done
@@ -149,7 +142,6 @@ if [[ "$DRY_RUN" == true ]]; then
   echo "Branch:     $BRANCH_NAME"
   echo "Local:      $REPO_PATH"
   echo "Worktree:   $WORKTREE_PATH"
-  echo "Sandbox:    $USE_SANDBOX"
   exit 0
 fi
 
@@ -212,17 +204,9 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Issue:     #${ISSUE_NUM} - ${ISSUE_TITLE}"
 echo "Worktree:  ${WORKTREE_PATH}"
-echo "Sandbox:   ${USE_SANDBOX}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-if [[ "$USE_SANDBOX" == true ]]; then
-  # Run Claude in sandbox (restricts file writes to worktree only)
-  SANDBOX_CMD="sandbox-exec -f $SANDBOX_PROFILE -D HOME=$HOME -D WORKTREE_PATH=$WORKTREE_PATH -D REPO_PATH=$REPO_PATH"
-  $SANDBOX_CMD $CLAUDE_CMD "$CLAUDE_PROMPT"
-else
-  # Run Claude without sandbox
-  $CLAUDE_CMD "$CLAUDE_PROMPT"
-fi
+$CLAUDE_CMD "$CLAUDE_PROMPT"
 
 log OK "Claude session ended"
