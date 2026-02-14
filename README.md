@@ -6,7 +6,7 @@ A CLI tool that creates isolated worktrees for GitHub Issues and processes them 
 
 - [gh](https://cli.github.com/) - GitHub CLI
 - [ghq](https://github.com/x-motemen/ghq) - Repository management
-- [git-wo](https://github.com/kfly8/git-wo) (>= v0.05) - Worktree management
+- [git-wo](https://github.com/kfly8/git-wo) (>= v0.06) - Worktree management
 - [jq](https://jqlang.github.io/jq/) - JSON processing
 - [Claude Code](https://claude.ai/claude-code) - Claude CLI
 
