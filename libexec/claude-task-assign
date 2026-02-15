@@ -190,12 +190,28 @@ URL: ${ISSUE_URL}
 ${ISSUE_BODY}
 
 ## Instructions
-1. Read CLAUDE.md if exists for project conventions
-2. Implement the feature/fix described above
-3. Write tests if applicable
-4. Commit with clear message referencing #${ISSUE_NUM}
-5. Push to origin/${BRANCH_NAME}
-6. Create PR with 'Closes #${ISSUE_NUM}' in the body"
+
+### Preparation
+1. Read CLAUDE.md if exists for project conventions and architectural decisions.
+2. Check existing codebase patterns first — grep for similar implementations in other components and match them exactly.
+
+### Implementation
+3. Always fix root causes, never add workarounds — if you find yourself patching symptoms, stop and re-analyze. Trace the issue to its source and fix it there. If you're unsure of the root cause, say so before writing code.
+4. Implement the fix/feature described above. For independent packages or modules, use Task to spawn parallel sub-agents that work simultaneously.
+5. Write tests if applicable.
+6. Run the full test suite (including e2e if available) after each significant change — not just at the end.
+7. If tests fail, diagnose the root cause and fix. Try at least 3 different approaches before asking for help.
+
+### Review
+8. Self-review: re-read CLAUDE.md and verify each change aligns with conventions. If anything violates a principle, fix it before proceeding.
+9. Check if README or docs need updates for version requirements or breaking changes.
+10. List any decisions you made that aren't covered by CLAUDE.md (so it can be updated later).
+
+### Delivery
+11. Commit with clear message referencing #${ISSUE_NUM}.
+12. Push to origin/${BRANCH_NAME} — do NOT push until all tests pass.
+13. Create PR with a clear description mapping changes to the issue requirements, including 'Closes #${ISSUE_NUM}' in the body.
+14. If CI fails on the PR, fix it and push again. Only consider the task done when the PR is green."
 
 CLAUDE_CMD="claude --permission-mode plan"
 
